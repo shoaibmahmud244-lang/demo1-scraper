@@ -99,6 +99,40 @@ instead of `£51.77`. Two independent causes:
 
 Both sites were re-crawled after the fix; all 1,000 prices carry `£`.
 
+## Four more bugs, found by running it instead of reading it
+
+The currency bug above was found because the numbers looked wrong. These four
+were found by executing the failure paths directly. None of them show up in a
+happy-path demo, and all four are the kind of thing that only appears under
+resume, retry, or operator error — which is to say, in production.
+
+**1. `sys.exit()` used without importing `sys`** — `NameError: name 'sys' is not
+defined`. The scraper's retry logic handled every network failure and none of
+the operator failures. Passing a bad `--site` produced a traceback instead of a
+usable message. Now exits 1 with a message listing the valid site names.
+
+**2. The resume counter double-counted rows.** `state["rows"] = state.get("rows", 0) + added`
+used a *run-scoped cumulative* `added` inside a per-page loop, so every page
+after the first re-added the entire running total. Thirty real rows reported as
+sixty — before any crash occurred. It now contributes only its per-page delta.
+
+**3. Multi-valued attributes crashed the parser.** `node.get("class", "")`
+returns a *list* from BeautifulSoup, not a string, so `re.search` raised
+`TypeError: expected string or bytes-like object`. The same value also broke
+substring lookup: `"price" in ["price", "red"]` is `False` even though the token
+is present. `attr_text()` now normalises list and tuple values to a string before
+any regex or substring work.
+
+**4. A re-run destroyed its own evidence.** `demo3-workflow/automate.py` opened
+its run log with mode `"w"`, so a routine second run overwrote the log of the
+first. The second run also legitimately re-validated every contact as a
+duplicate, so the replacement log claimed `Upserted 0 contacts` while the CRM file
+still held three — a fabricated record. It now appends behind a separator, and
+`os` was imported while fixing it.
+
+All four were re-verified by execution after the fix, and both sites re-crawled
+clean: 1,000 and 10 rows.
+
 ## Deliberately not included
 
 No user-agent spoofing, no proxy rotation, no CAPTCHA solving, no
